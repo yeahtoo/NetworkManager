@@ -18,6 +18,8 @@
 #include "nm-dhcp-client-logging.h"
 #include "nm-core-internal.h"
 
+#define NM_DHCP_CLIENT_ID_LEN_MAX (255)
+
 /*****************************************************************************/
 
 static gboolean
@@ -722,32 +724,35 @@ nm_dhcp_utils_duid_to_string (GBytes *duid)
 GBytes *
 nm_dhcp_utils_client_id_string_to_bytes (const char *client_id)
 {
-	GBytes *bytes = NULL;
-	guint len;
-	char *c;
+	guint8 *buffer = NULL;
+	gsize len;
 
 	g_return_val_if_fail (client_id && client_id[0], NULL);
 
 	/* Try as hex encoded */
 	if (strchr (client_id, ':')) {
-		bytes = nm_utils_hexstr2bin (client_id);
-
-		/* the result must be at least two bytes long,
-		 * because @client_id contains a delimiter
-		 * but nm_utils_hexstr2bin() does not allow
-		 * leading nor trailing delimiters. */
-		nm_assert (!bytes || g_bytes_get_size (bytes) >= 2);
+		buffer = nm_utils_hexstr2bin_alloc (client_id,
+		                                    TRUE,
+		                                    FALSE,
+		                                    ":",
+		                                    0,
+		                                    &len);
+		if (len > NM_DHCP_CLIENT_ID_LEN_MAX) {
+			len = NM_DHCP_CLIENT_ID_LEN_MAX;
+			buffer = g_realloc (buffer, len);
+		}
 	}
-	if (!bytes) {
+	if (!buffer) {
 		/* Fall back to string */
-		len = strlen (client_id);
-		c = g_malloc (len + 1);
-		c[0] = 0;  /* type: non-hardware address per RFC 2132 section 9.14 */
-		memcpy (c + 1, client_id, len);
-		bytes = g_bytes_new_take (c, len + 1);
+		len = NM_MIN (NM_DHCP_CLIENT_ID_LEN_MAX, strlen (client_id) + 1);
+		buffer = g_malloc (len);
+		buffer[0] = 0;  /* type: non-hardware address per RFC 2132 section 9.14 */
+		memcpy (buffer + 1, client_id, len - 1);
 	}
 
-	return bytes;
+	nm_assert (buffer && len >= 2 && len <= NM_DHCP_CLIENT_ID_LEN_MAX);
+	return g_bytes_new_take (buffer, len);
+;
 }
 
 /**

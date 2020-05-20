@@ -1194,7 +1194,7 @@ nettools_create (NMDhcpNettools *self,
 	n_dhcp4_client_config_set_broadcast_mac (config, bcast_hwaddr_arr, bcast_hwaddr_len);
 	r = n_dhcp4_client_config_set_client_id (config,
 	                                         client_id_arr,
-	                                         NM_MIN (client_id_len, 1 + _NM_SD_MAX_CLIENT_ID_LEN));
+	                                         client_id_len);
 	if (r) {
 		set_error_nettools (error, r, "failed to set client-id");
 		return FALSE;
