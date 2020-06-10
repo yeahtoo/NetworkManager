@@ -57,7 +57,6 @@ NM_GOBJECT_PROPERTIES_DEFINE (NMSettingBridge,
 typedef struct {
 	GPtrArray *vlans;
 	char *   mac_address;
-	char *   multicast_router;
 	char *   group_address;
 	char *   vlan_protocol;
 	guint64  multicast_last_member_interval;
@@ -70,6 +69,7 @@ typedef struct {
 	guint32  multicast_hash_max;
 	guint32  multicast_last_member_count;
 	guint32  multicast_startup_query_count;
+	gint32   multicast_router;
 	guint16  priority;
 	guint16  forward_delay;
 	guint16  hello_time;
@@ -976,10 +976,10 @@ nm_setting_bridge_get_vlan_stats_enabled (const NMSettingBridge *setting)
  *
  * Since 1.24
  **/
-const char *
+int
 nm_setting_bridge_get_multicast_router (const NMSettingBridge *setting)
 {
-	g_return_val_if_fail (NM_IS_SETTING_BRIDGE (setting), NULL);
+	g_return_val_if_fail (NM_IS_SETTING_BRIDGE (setting), -1);
 
 	return NM_SETTING_BRIDGE_GET_PRIVATE (setting)->multicast_router;
 }
@@ -1272,15 +1272,14 @@ verify (NMSetting *setting, NMConnection *connection, GError **error)
 		return FALSE;
 	}
 
-	if (!NM_IN_STRSET (priv->multicast_router,
-	                   NULL,
-	                   "auto",
-	                   "enabled",
-	                   "disabled")) {
+	G_STATIC_ASSERT_EXPR (NM_BRIDGE_MULTICAST_ROUTER_MIN == -1);
+	G_STATIC_ASSERT_EXPR (NM_BRIDGE_MULTICAST_ROUTER_MAX == 2);
+	if (   priv->multicast_router < NM_BRIDGE_MULTICAST_ROUTER_MIN
+	    || priv->multicast_router > NM_BRIDGE_MULTICAST_ROUTER_MAX) {
 		g_set_error_literal (error,
 		                     NM_CONNECTION_ERROR,
 		                     NM_CONNECTION_ERROR_INVALID_PROPERTY,
-		                     _("is not a valid option"));
+		                     _("is not a valid multicast_router option"));
 		g_prefix_error (error, "%s.%s: ", NM_SETTING_BRIDGE_SETTING_NAME, NM_SETTING_BRIDGE_MULTICAST_ROUTER);
 		return FALSE;
 	}
@@ -1397,7 +1396,7 @@ get_property (GObject *object, guint prop_id,
 		g_value_set_boolean (value, priv->multicast_snooping);
 		break;
 	case PROP_MULTICAST_ROUTER:
-		g_value_set_string (value, priv->multicast_router);
+		g_value_set_int (value, priv->multicast_router);
 		break;
 	case PROP_MULTICAST_QUERIER:
 		g_value_set_boolean (value, priv->multicast_querier);
@@ -1497,8 +1496,7 @@ set_property (GObject *object, guint prop_id,
 		priv->multicast_snooping = g_value_get_boolean (value);
 		break;
 	case PROP_MULTICAST_ROUTER:
-		g_free (priv->multicast_router);
-		priv->multicast_router = g_value_dup_string (value);
+		priv->multicast_router = g_value_get_int (value);
 		break;
 	case PROP_MULTICAST_QUERIER:
 		priv->multicast_querier = g_value_get_boolean (value);
@@ -1572,6 +1570,7 @@ nm_setting_bridge_init (NMSettingBridge *setting)
 	priv->multicast_querier_interval        = NM_BRIDGE_MULTICAST_QUERIER_INTERVAL_DEF;
 	priv->multicast_startup_query_count     = NM_BRIDGE_MULTICAST_STARTUP_QUERY_COUNT_DEF;
 	priv->multicast_startup_query_interval  = NM_BRIDGE_MULTICAST_STARTUP_QUERY_INTERVAL_DEF;
+	priv->multicast_router                  = NM_BRIDGE_MULTICAST_ROUTER_DEF;
 
 	nm_assert (priv->multicast_querier          == NM_BRIDGE_MULTICAST_QUERIER_DEF);
 	nm_assert (priv->multicast_query_use_ifaddr == NM_BRIDGE_MULTICAST_QUERY_USE_IFADDR_DEF);
@@ -1597,7 +1596,6 @@ finalize (GObject *object)
 	NMSettingBridgePrivate *priv = NM_SETTING_BRIDGE_GET_PRIVATE (object);
 
 	g_free (priv->mac_address);
-	g_free (priv->multicast_router);
 	g_free (priv->group_address);
 	g_free (priv->vlan_protocol);
 	g_ptr_array_unref (priv->vlans);
@@ -1986,27 +1984,28 @@ nm_setting_bridge_class_init (NMSettingBridgeClass *klass)
 	 * NMSettingBridge:multicast-router:
 	 *
 	 * Sets bridge's multicast router. Multicast-snooping must be enabled
-	 * for this option to work.
+	 * for this option to work. Can be either 0 (disabled),
+	 * 1 (auto, temp-query), 2 (enabled, perm).
 	 *
-	 * Supported values are: 'auto', 'disabled', 'enabled'.
-	 * If not specified the default value is 'auto'.
+	 * The default values is -1, which means unset. Depending on
+	 * multicast_snooping that translates to 1 (auto) or 0 (disabled).
 	 **/
 	/* ---ifcfg-rh---
 	 * property: multicast-router
 	 * variable: BRIDGING_OPTS: multicast_router=
-	 * values: auto, enabled, disabled
-	 * default: auto
-	 * example: BRIDGING_OPTS="multicast_router=enabled"
+	 * values: -1, 0, 1, 2
+	 * default: -1
+	 * example: BRIDGING_OPTS="multicast_router=0"
 	 * ---end---
 	 *
 	 * Since: 1.24
 	 */
 	obj_properties[PROP_MULTICAST_ROUTER] =
-	    g_param_spec_string (NM_SETTING_BRIDGE_MULTICAST_ROUTER, "", "",
-	                         NULL,
-	                         G_PARAM_READWRITE |
-	                         NM_SETTING_PARAM_INFERRABLE |
-	                         G_PARAM_STATIC_STRINGS);
+	    g_param_spec_int (NM_SETTING_BRIDGE_MULTICAST_ROUTER, "", "",
+	                      G_MININT32, G_MAXINT32, ,
+	                      G_PARAM_READWRITE |
+	                      NM_SETTING_PARAM_INFERRABLE |
+	                      G_PARAM_STATIC_STRINGS);
 
 	/**
 	 * NMSettingBridge:multicast-query-use-ifaddr:

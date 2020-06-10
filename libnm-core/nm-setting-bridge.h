@@ -141,7 +141,7 @@ NM_AVAILABLE_IN_1_24
 gboolean nm_setting_bridge_get_vlan_stats_enabled (const NMSettingBridge *setting);
 
 NM_AVAILABLE_IN_1_24
-const char *   nm_setting_bridge_get_multicast_router (const NMSettingBridge *setting);
+int nm_setting_bridge_get_multicast_router (const NMSettingBridge *setting);
 
 NM_AVAILABLE_IN_1_24
 gboolean nm_setting_bridge_get_multicast_query_use_ifaddr (const NMSettingBridge *setting);
