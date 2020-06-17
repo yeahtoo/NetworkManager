@@ -37,6 +37,21 @@ qdiscs_lookup (int ifindex)
 	                                 NULL, NULL);
 }
 
+static gboolean
+skip_tc_test (void)
+{
+	static int tc_found = -1;
+
+	if (tc_found == -1)
+		tc_found = (nmtstp_run_command ("tc >/dev/null 2>&1") == 0);
+
+	if (!tc_found) {
+		g_test_skip ("The 'tc' binary is not available");
+		return TRUE;
+	}
+	return FALSE;
+}
+
 static void
 test_qdisc1 (void)
 {
@@ -45,6 +60,9 @@ test_qdisc1 (void)
 	gs_unref_ptrarray GPtrArray *plat = NULL;
 	NMPObject *obj;
 	NMPlatformQdisc *qdisc;
+
+	if (skip_tc_test ())
+		return;
 
 	ifindex = nm_platform_link_get_ifindex (NM_PLATFORM_GET, DEVICE_NAME);
 	g_assert_cmpint (ifindex, >, 0);
@@ -82,6 +100,9 @@ test_qdisc_fq_codel (void)
 	gs_unref_ptrarray GPtrArray *plat = NULL;
 	NMPObject *obj;
 	NMPlatformQdisc *qdisc;
+
+	if (skip_tc_test ())
+		return;
 
 	ifindex = nm_platform_link_get_ifindex (NM_PLATFORM_GET, DEVICE_NAME);
 	g_assert_cmpint (ifindex, >, 0);
@@ -122,6 +143,9 @@ test_qdisc_sfq (void)
 	NMPObject *obj;
 	NMPlatformQdisc *qdisc;
 
+	if (skip_tc_test ())
+		return;
+
 	ifindex = nm_platform_link_get_ifindex (NM_PLATFORM_GET, DEVICE_NAME);
 	g_assert_cmpint (ifindex, >, 0);
 
@@ -160,6 +184,9 @@ test_qdisc_tbf (void)
 	gs_unref_ptrarray GPtrArray *plat = NULL;
 	NMPObject *obj;
 	NMPlatformQdisc *qdisc;
+
+	if (skip_tc_test ())
+		return;
 
 	ifindex = nm_platform_link_get_ifindex (NM_PLATFORM_GET, DEVICE_NAME);
 	g_assert_cmpint (ifindex, >, 0);
