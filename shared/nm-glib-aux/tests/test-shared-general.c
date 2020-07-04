@@ -8,6 +8,7 @@
 #include "nm-default.h"
 
 #include "nm-std-aux/unaligned.h"
+#include "nm-std-aux/nm-tlv.h"
 #include "nm-glib-aux/nm-random-utils.h"
 #include "nm-glib-aux/nm-str-buf.h"
 #include "nm-glib-aux/nm-time-utils.h"
@@ -876,6 +877,404 @@ again:
 
 /*****************************************************************************/
 
+typedef struct {
+	GValue value;
+	guint16 attr;
+} TestTlvValue;
+
+static char *
+_tlv_rand_word (void)
+{
+	NMStrBuf sbuf = NM_STR_BUF_INIT (0, nmtst_get_rand_bool ());
+	gsize len;
+
+	len = nmtst_get_rand_word_length (NULL);
+	for (; len > 0; len--)
+		nm_str_buf_append_c (&sbuf, '0' + (nmtst_get_rand_uint32 () % 10));
+
+	/* The returned string has two NUL characters at the end. */
+	nm_str_buf_append_c (&sbuf, '\0');
+
+	return nm_str_buf_finalize (&sbuf, NULL);
+}
+
+static void
+test_tlv_rnd (void)
+{
+	gs_unref_array GArray *policy_arr = NULL;
+	gs_unref_array GArray *values_arr = NULL;
+	gs_unref_ptrarray GPtrArray *parsed_arr = NULL;
+	gs_unref_ptrarray GPtrArray *val_by_idx_attr_arr = NULL;
+	int i_run;
+
+	policy_arr = g_array_new (FALSE, TRUE, sizeof (NMTlvPolicy));
+	values_arr = g_array_new (FALSE, TRUE, sizeof (TestTlvValue));
+	g_array_set_clear_func (values_arr, (GDestroyNotify) g_value_unset);
+	parsed_arr = g_ptr_array_new ();
+	val_by_idx_attr_arr = g_ptr_array_new ();
+
+#define _L_enabled 0
+#define _L(fmt, ...) do { if (_L_enabled) { printf (">>> " fmt "\n", ##__VA_ARGS__); } } while (0)
+
+	for (i_run = 0; i_run < 100; i_run++) {
+		gs_free guint8 *msg_data = NULL;
+		const NMTlvAttr **parsed;
+		const TestTlvValue **val_by_idx_attr;
+		gs_free char *hex_str = NULL;
+		NMTlvPolicy *policy;
+		TestTlvValue *values;
+		guint policy_len;
+		guint values_len;
+		gsize msg_alloc = 0;
+		gsize msg_len = 0;
+		int i;
+		int r;
+		int msg_parsed_len;
+
+		_L ("run: %d", i_run);
+
+		g_array_set_size (policy_arr, 0);
+		g_array_set_size (values_arr, 0);
+
+		/* initialize a random policy. */
+		policy_len = nmtst_get_rand_word_length (NULL) + 1;
+		g_array_set_size (policy_arr, policy_len);
+		g_ptr_array_set_size (val_by_idx_attr_arr, policy_len);
+		policy = (NMTlvPolicy *) policy_arr->data;
+		val_by_idx_attr = (const TestTlvValue **) val_by_idx_attr_arr->pdata;
+		_L ("policy: length=%u", policy_len);
+		for (i = 0; i < policy_len; i++) {
+			policy[i].type = nmtst_rand_select (NM_TLV_TYPE_NONE,
+			                                    NM_TLV_TYPE_BOOL,
+			                                    NM_TLV_TYPE_INT32,
+			                                    NM_TLV_TYPE_UINT32,
+			                                    NM_TLV_TYPE_INT64,
+			                                    NM_TLV_TYPE_UINT64,
+			                                    NM_TLV_TYPE_STR,
+			                                    NM_TLV_TYPE_MEM);
+			val_by_idx_attr[i] = NULL;
+			_L ("policy: [%i]: type=%d", i, policy[i].type);
+		}
+
+		/* initialize a random list of values for the policy. */
+		g_array_set_size (values_arr, policy_arr->len);
+		for (i = 0; i < policy_arr->len; i++)
+			(g_array_index (values_arr, TestTlvValue, i)).attr = i;
+		values_len = nmtst_get_rand_uint32 () % (policy_arr->len + 1);
+		g_array_set_size (values_arr, values_len);
+		nmtst_rand_perm (NULL, values_arr->data, NULL, sizeof (TestTlvValue), values_len);
+		values = (TestTlvValue *) values_arr->data;
+		_L ("values: length=%u", values_len);
+		for (i = 0; i < values_len; i++) {
+			TestTlvValue *v = &values[i];
+			const NMTlvPolicy *p = &policy[v->attr];
+
+			g_assert (v->attr < policy_arr->len);
+			g_assert (!val_by_idx_attr[v->attr]);
+			switch (p->type) {
+			case NM_TLV_TYPE_BOOL:
+				g_value_init (&v->value, G_TYPE_BOOLEAN);
+				g_value_set_boolean (&v->value, nmtst_get_rand_bool ());
+				_L ("values: [%i]: attr=%d, type=%d, val_bool=%d", i, v->attr, p->type, g_value_get_boolean (&v->value));
+				break;
+			case NM_TLV_TYPE_INT32:
+				g_value_init (&v->value, G_TYPE_INT);
+				g_value_set_int (&v->value, (int) nmtst_get_rand_uint64 ());
+				_L ("values: [%i]: attr=%d, type=%d, val_int32=%d (0x%08x)", i, v->attr, p->type, g_value_get_int (&v->value), g_value_get_int (&v->value));
+				break;
+			case NM_TLV_TYPE_UINT32:
+				g_value_init (&v->value, G_TYPE_UINT);
+				g_value_set_uint (&v->value, nmtst_get_rand_uint32 ());
+				_L ("values: [%i]: attr=%d, type=%d, val_uint32=0x%08x", i, v->attr, p->type, g_value_get_uint (&v->value));
+				break;
+			case NM_TLV_TYPE_INT64:
+				g_value_init (&v->value, G_TYPE_INT64);
+				g_value_set_int64 (&v->value, (gint64) nmtst_get_rand_uint64 ());
+				_L ("values: [%i]: attr=%d, type=%d, val_int64=%"G_GINT64_FORMAT" (0x%016"G_GINT64_MODIFIER"x)", i, v->attr, p->type, g_value_get_int64 (&v->value), g_value_get_int64 (&v->value));
+				break;
+			case NM_TLV_TYPE_UINT64:
+				g_value_init (&v->value, G_TYPE_UINT64);
+				g_value_set_uint64 (&v->value, nmtst_get_rand_uint64 ());
+				_L ("values: [%i]: attr=%d, type=%d, val_uint64=0x%016"G_GUINT64_FORMAT, i, v->attr, p->type, g_value_get_uint64 (&v->value));
+				break;
+			case NM_TLV_TYPE_STR:
+			case NM_TLV_TYPE_MEM:
+				g_value_init (&v->value, G_TYPE_STRING);
+				g_value_take_string (&v->value, _tlv_rand_word ());
+				_L ("values: [%i]: attr=%d, type=%d, val_%s=\"%s\" (%zu)", i, v->attr, p->type, p->type == NM_TLV_TYPE_STR ? "str" : "mem", g_value_get_string (&v->value), strlen (g_value_get_string (&v->value)));
+				break;
+			default:
+				g_assert (p->type == NM_TLV_TYPE_NONE);
+				break;
+			}
+			if (p->type != NM_TLV_TYPE_NONE)
+				val_by_idx_attr[v->attr] = v;
+		}
+
+		if (nmtst_get_rand_bool ())
+			msg_data = g_malloc (1);
+		for (i = 0; i < values_len; i++) {
+			const TestTlvValue *v = &values[i];
+			const NMTlvPolicy *p = &policy[v->attr];
+
+			switch (p->type) {
+			case NM_TLV_TYPE_BOOL:
+				r = nm_tlv_msg_append_bool ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, g_value_get_boolean (&v->value));
+				g_assert_cmpint (r, ==, 0);
+				break;
+			case NM_TLV_TYPE_INT32:
+				r = nm_tlv_msg_append_int32 ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, g_value_get_int (&v->value));
+				g_assert_cmpint (r, ==, 0);
+				break;
+			case NM_TLV_TYPE_UINT32:
+				r = nm_tlv_msg_append_uint32 ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, g_value_get_uint (&v->value));
+				g_assert_cmpint (r, ==, 0);
+				break;
+			case NM_TLV_TYPE_INT64:
+				r = nm_tlv_msg_append_int64 ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, g_value_get_int64 (&v->value));
+				g_assert_cmpint (r, ==, 0);
+				break;
+			case NM_TLV_TYPE_UINT64:
+				r = nm_tlv_msg_append_uint64 ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, g_value_get_uint64 (&v->value));
+				g_assert_cmpint (r, ==, 0);
+				break;
+			case NM_TLV_TYPE_MEM:
+			case NM_TLV_TYPE_STR: {
+				const char *s = g_value_get_string (&v->value);
+				gssize l = strlen (s);
+
+				if (p->type == NM_TLV_TYPE_STR) {
+					if (l == 0) {
+						if (nmtst_get_rand_bool ())
+							s = NULL;
+						else
+							l = -1;
+					} else {
+						if (nmtst_get_rand_bool ())
+							l = -1;
+					}
+					r = nm_tlv_msg_append_str ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, s, l);
+				} else
+					r = nm_tlv_msg_append_mem ((void **) &msg_data, &msg_alloc, &msg_len, policy, v->attr, s, l);
+				g_assert_cmpint (r, ==, 0);
+				break;
+			}
+			default:
+				g_assert (p->type == NM_TLV_TYPE_NONE);
+				break;
+			}
+		}
+
+		g_ptr_array_set_size (parsed_arr, policy_len);
+		parsed = (const NMTlvAttr **) parsed_arr->pdata;
+
+		_L ("binary: (%zu) %s", msg_len, (hex_str = nm_utils_bin2hexstr_full (msg_data, msg_len, ':', FALSE, NULL)));
+
+		r = nm_tlv_msg_parse_full (msg_data,
+		                           msg_len,
+		                           policy,
+		                           policy_len,
+		                           parsed,
+		                             nmtst_get_rand_bool ()
+		                           ? NM_TLV_PARSE_FLAGS_STRICT
+		                           : NM_TLV_PARSE_FLAGS_NONE);
+		g_assert_cmpint (r, >=, 0);
+		msg_parsed_len = r;
+
+		_L ("parsed: highest-attr=%d-1", msg_parsed_len);
+
+		g_assert (msg_parsed_len == 0 || parsed[msg_parsed_len] - 1);
+
+		for (i = 0; i < policy_len; i++) {
+			const NMTlvAttr *a = parsed[i];
+			const NMTlvPolicy *p = &policy[i];
+
+			_L ("parsed: attr=%d, type=%d, offset=%d", i, p->type, a ? ((int) ((guint8 *) a - (guint8 *) msg_data)) : -1);
+		}
+
+		for (i = 0; i < policy_len; i++) {
+			const NMTlvPolicy *p = &policy[i];
+			const TestTlvValue *v = val_by_idx_attr[i];
+			const NMTlvAttr *a = parsed[i];
+
+			if (!a) {
+				g_assert (!v);
+				continue;
+			}
+
+			g_assert (i < msg_parsed_len);
+			g_assert (v);
+			switch (p->type) {
+			case NM_TLV_TYPE_BOOL:
+				g_assert_cmpint (g_value_get_boolean (&v->value), ==, nm_tlv_attr_get_bool (policy, a));
+				break;
+			case NM_TLV_TYPE_INT32:
+				g_assert_cmpint (g_value_get_int (&v->value), ==, nm_tlv_attr_get_int32 (policy, a));
+				break;
+			case NM_TLV_TYPE_UINT32:
+				g_assert_cmpint (g_value_get_uint (&v->value), ==, nm_tlv_attr_get_uint32 (policy, a));
+				break;
+			case NM_TLV_TYPE_INT64:
+				g_assert_cmpint (g_value_get_int64 (&v->value), ==, nm_tlv_attr_get_int64 (policy, a));
+				break;
+			case NM_TLV_TYPE_UINT64:
+				g_assert_cmpint (g_value_get_uint64 (&v->value), ==, nm_tlv_attr_get_uint64 (policy, a));
+				break;
+			case NM_TLV_TYPE_STR: {
+				const char *s;
+				gsize l;
+				gsize *p_l = nmtst_get_rand_bool () ? &l : NULL;
+
+				s = nm_tlv_attr_get_str (policy, a, p_l);
+				g_assert (s);
+				g_assert (!p_l || strlen (s) == *p_l);
+				g_assert_cmpstr (s, ==, g_value_get_string (&v->value));
+				break;
+			}
+			case NM_TLV_TYPE_MEM: {
+				const char *s;
+				const char *s0;
+				gsize l;
+
+				s = (const char *) nm_tlv_attr_get_mem (policy, a, &l);
+				g_assert (s);
+				s0 = g_value_get_string (&v->value);
+				g_assert_cmpint (strlen (s0), ==, l);
+				g_assert (strncmp (s, s0, l) == 0);
+				break;
+			}
+			default:
+				g_assert_not_reached ();
+			}
+		}
+	}
+}
+
+/*****************************************************************************/
+
+static void
+test_tlv_manual (void)
+{
+	static const NMTlvPolicy policy[5] = {
+		[1] = NM_TLV_POLICY_INIT (NM_TLV_TYPE_BOOL),
+		[2] = NM_TLV_POLICY_INIT (NM_TLV_TYPE_UINT32),
+		[3] = NM_TLV_POLICY_INIT (NM_TLV_TYPE_MEM),
+	};
+	const NMTlvAttr *tb[G_N_ELEMENTS (policy)];
+	const NMTlvAttr *tb2[G_N_ELEMENTS (policy)];
+	const NMTlvAttr *tb3[G_N_ELEMENTS (policy)];
+	const NMTlvAttr *attr;
+	int r;
+	static const guint8 msg_bin[] = {
+		0x30, 0x00, 0x00, 0x04,
+			0xaa, 0xbb, 0xcc, 0xdd,
+		0x01, 0x00, 0x00, 0x01,
+			0x01, 0x00, 0x00, 0x00,
+		0x03, 0x00, 0x00, 0x08,
+			0x02, 0x00, 0x00, 0x04,
+				0x01, 0x03, 0x05, 0x30,
+	};
+	const gsize msg_len = G_N_ELEMENTS (msg_bin);
+	gs_free const NMTlvAttr **attrs_list = NULL;
+	gs_free guint8 *msg2_bin = NULL;
+	gsize msg2_alloc = 0;
+	gsize msg2_len = 0;
+	gsize nest_start;
+	int i;
+	guint32 u32;
+
+	r = nm_tlv_msg_parse_full (msg_bin, msg_len, policy, G_N_ELEMENTS (policy), tb, NM_TLV_PARSE_FLAGS_STRICT);
+	g_assert_cmpint (r, ==, -ENOENT);
+
+	if (nmtst_get_rand_bool ())
+		r = nm_tlv_msg_parse_full (msg_bin, msg_len, policy, G_N_ELEMENTS (policy), tb, NM_TLV_PARSE_FLAGS_NONE);
+	else
+		r = nm_tlv_msg_parse (msg_bin, msg_len, policy, tb, NM_TLV_PARSE_FLAGS_NONE);
+	g_assert_cmpint (r, ==, 4);
+	g_assert (!tb[0]);
+	g_assert ((gpointer) tb[1] == &msg_bin[8]);
+	g_assert (!tb[2]);
+	g_assert ((gpointer) tb[3] == &msg_bin[16]);
+	g_assert (!tb[4]);
+	g_assert_cmpint (tb[1]->att_type, ==, 1);
+
+	i = 0;
+	nm_tlv_msg_foreach (attr, msg_bin, msg_len) {
+		switch (i++) {
+		case 0:
+			g_assert (attr->att_type == 0x30);
+			g_assert ((gpointer) attr == &msg_bin[0]);
+			break;
+		case 1:
+			g_assert (attr == tb[1]);
+			g_assert ((gpointer) attr == &msg_bin[8]);
+			break;
+		case 2:
+			g_assert (attr == tb[3]);
+			g_assert ((gpointer) attr == &msg_bin[16]);
+			break;
+		default:
+			g_assert_not_reached();
+		}
+	}
+	g_assert (i == 3);
+
+	r = nm_tlv_msg_get_attrs (msg_bin, msg_len, tb, G_N_ELEMENTS (tb), &attrs_list);
+	g_assert_cmpint (r, ==, 2);
+	g_assert (attrs_list[0] == tb[1]);
+	g_assert (attrs_list[1] == tb[3]);
+	g_assert (!attrs_list[2]);
+
+	nm_clear_pointer (&attrs_list, free);
+
+	r = nm_tlv_msg_get_attrs (msg_bin, msg_len, NULL, 0, &attrs_list);
+	g_assert_cmpint (r, ==, 3);
+	g_assert (attrs_list[0] == (gpointer) msg_bin);
+	g_assert (attrs_list[1] == tb[1]);
+	g_assert (attrs_list[2] == tb[3]);
+	g_assert (!attrs_list[3]);
+
+	g_assert (tb[3]);
+	{
+		const guint8 *attr3;
+		gsize attr3_len;
+
+		attr3 = nm_tlv_attr_get_mem (policy, tb[3], &attr3_len);
+		g_assert (attr3);
+		g_assert (attr3 == &msg_bin[20]);
+		g_assert (attr3_len == 8);
+		r = nm_tlv_msg_parse_full (attr3, attr3_len, policy, G_N_ELEMENTS (policy), tb2, NM_TLV_PARSE_FLAGS_STRICT);
+		g_assert_cmpint (r, ==, 3);
+	}
+
+	u32 = htobe32 (0xaabbccddu);
+	r = _nm_tlv_msg_append ((gpointer *) &msg2_bin, &msg2_alloc, &msg2_len, 0x30, &u32, sizeof (u32), false);
+	g_assert_cmpint (r, ==, 0);
+	nm_tlv_msg_append_bool ((gpointer *) &msg2_bin, &msg2_alloc, &msg2_len, policy, 1, TRUE);
+	g_assert_cmpint (r, ==, 0);
+
+nest_start:
+	r = nm_tlv_msg_nest_open ((gpointer *) &msg2_bin, &msg2_alloc, &msg2_len, 3, &nest_start);
+	g_assert_cmpint (r, ==, 0);
+	r = nm_tlv_msg_append_uint32 ((gpointer *) &msg2_bin, &msg2_alloc, &msg2_len, policy, 2, 0x01030530);
+	g_assert_cmpint (r, ==, 0);
+	if (nmtst_get_rand_bool ()) {
+		nm_tlv_msg_nest_reset ((gpointer *) &msg2_bin, &msg2_len, nest_start);
+		goto nest_start;
+	}
+
+	r = nm_tlv_msg_nest_close ((gpointer *) &msg2_bin, &msg2_len, nest_start);
+	g_assert_cmpint (r, ==, 0);
+
+	r = nm_tlv_msg_parse (msg2_bin, msg2_len, policy, tb3, NM_TLV_PARSE_FLAGS_NONE);
+	g_assert_cmpint (r, ==, 4);
+
+	g_assert_cmpint (msg_len, ==, msg2_len);
+	g_assert_cmpmem (msg2_bin, msg2_len, msg_bin, msg_len);
+}
+
+/*****************************************************************************/
+
 NMTST_DEFINE ();
 
 int main (int argc, char **argv)
@@ -898,6 +1297,8 @@ int main (int argc, char **argv)
 	g_test_add_func ("/general/test_nm_utils_get_next_realloc_size", test_nm_utils_get_next_realloc_size);
 	g_test_add_func ("/general/test_nm_str_buf", test_nm_str_buf);
 	g_test_add_func ("/general/test_nm_utils_parse_next_line", test_nm_utils_parse_next_line);
+	g_test_add_func ("/general/test_tlv_rnd", test_tlv_rnd);
+	g_test_add_func ("/general/test_tlv_manual", test_tlv_manual);
 
 	return g_test_run ();
 }
