@@ -437,6 +437,38 @@ shared_nm_glib_aux_libnm_glib_aux_la_LIBADD = \
 
 ###############################################################################
 
+shared_nm_sbox_wrapper_cppflags = \
+	$(dflt_cppflags) \
+	-I$(srcdir)/shared \
+	$(CODE_COVERAGE_CFLAGS) \
+	$(SANITIZER_LIB_CFLAGS) \
+	$(GLIB_CFLAGS) \
+	-DG_LOG_DOMAIN=\""libnm"\" \
+	-DNETWORKMANAGER_COMPILATION='(NM_NETWORKMANAGER_COMPILATION_GLIB|NM_NETWORKMANAGER_COMPILATION_WITH_GLIB_I18N_LIB)' \
+	$(NULL)
+
+noinst_LTLIBRARIES += shared/nm-sbox-wrapper/libnm-sbox-wrapper.la
+
+shared_nm_sbox_wrapper_libnm_sbox_wrapper_la_CPPFLAGS = \
+	$(shared_nm_sbox_wrapper_cppflags) \
+	$(NULL)
+
+shared_nm_sbox_wrapper_libnm_sbox_wrapper_la_SOURCES = \
+	shared/nm-sbox-wrapper/nm-sbox-wrapper.c \
+	shared/nm-sbox-wrapper/nm-sbox-wrapper.h \
+	$(NULL)
+
+shared_nm_sbox_wrapper_libnm_sbox_wrapper_la_LDFLAGS = \
+	$(CODE_COVERAGE_LDFLAGS) \
+	$(SANITIZER_LIB_LDFLAGS) \
+	$(NULL)
+
+shared_nm_sbox_wrapper_libnm_sbox_wrapper_la_LIBADD = \
+	$(GLIB_LIBS) \
+	$(NULL)
+
+###############################################################################
+
 noinst_LTLIBRARIES += shared/nm-udev-aux/libnm-udev-aux.la
 
 shared_nm_udev_aux_libnm_udev_aux_la_CPPFLAGS = \
