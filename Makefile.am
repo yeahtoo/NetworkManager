@@ -2038,8 +2038,6 @@ src_libnm_systemd_core_la_SOURCES = \
 	src/systemd/src/libsystemd-network/sd-dhcp-lease.c \
 	src/systemd/src/libsystemd-network/sd-dhcp6-client.c \
 	src/systemd/src/libsystemd-network/sd-dhcp6-lease.c \
-	src/systemd/src/libsystemd-network/sd-ipv4acd.c \
-	src/systemd/src/libsystemd-network/sd-ipv4ll.c \
 	src/systemd/src/libsystemd-network/sd-lldp.c \
 	src/systemd/src/libsystemd/sd-event/event-source.h \
 	src/systemd/src/libsystemd/sd-event/event-util.c \
@@ -2057,8 +2055,6 @@ src_libnm_systemd_core_la_SOURCES = \
 	src/systemd/src/systemd/sd-dhcp6-option.h \
 	src/systemd/src/systemd/sd-event.h \
 	src/systemd/src/systemd/sd-id128.h \
-	src/systemd/src/systemd/sd-ipv4acd.h \
-	src/systemd/src/systemd/sd-ipv4ll.h \
 	src/systemd/src/systemd/sd-lldp.h \
 	src/systemd/src/systemd/sd-ndisc.h \
 	$(NULL)
@@ -2183,8 +2179,6 @@ src_libNetworkManager_la_SOURCES = \
 	src/nm-checkpoint-manager.c \
 	src/nm-checkpoint-manager.h \
 	\
-	src/devices/nm-acd-manager.c \
-	src/devices/nm-acd-manager.h \
 	src/devices/nm-lldp-listener.c \
 	src/devices/nm-lldp-listener.h \
 	src/devices/nm-device.c \
@@ -4007,20 +4001,14 @@ src_devices_tests_ldflags = \
 
 check_programs += \
 	src/devices/tests/test-lldp \
-	src/devices/tests/test-acd
+	$(NULL)
 
 src_devices_tests_test_lldp_CPPFLAGS = $(src_cppflags_test)
 src_devices_tests_test_lldp_LDFLAGS = $(src_devices_tests_ldflags)
 src_devices_tests_test_lldp_LDADD = \
 	src/libNetworkManagerTest.la
 
-src_devices_tests_test_acd_CPPFLAGS = $(src_cppflags_test)
-src_devices_tests_test_acd_LDFLAGS = $(src_devices_tests_ldflags)
-src_devices_tests_test_acd_LDADD = \
-	src/libNetworkManagerTest.la
-
 $(src_devices_tests_test_lldp_OBJECTS): $(libnm_core_lib_h_pub_mkenums)
-$(src_devices_tests_test_acd_OBJECTS): $(libnm_core_lib_h_pub_mkenums)
 
 EXTRA_DIST += \
 	src/devices/tests/meson.build
