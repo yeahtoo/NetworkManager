@@ -34,6 +34,7 @@
 #include "nm-setting-ip6-config.h"
 #include "nm-setting-wireless.h"
 #include "nm-setting-wireless-security.h"
+#include "systemd/nm-sd-utils-shared.h"
 
 #ifdef __NM_SD_UTILS_H__
     #error \
@@ -5119,3 +5120,48 @@ NM_UTILS_LOOKUP_STR_DEFINE(nm_activation_type_to_string,
                            NM_UTILS_LOOKUP_STR_ITEM(NM_ACTIVATION_TYPE_MANAGED, "managed"),
                            NM_UTILS_LOOKUP_STR_ITEM(NM_ACTIVATION_TYPE_ASSUME, "assume"),
                            NM_UTILS_LOOKUP_STR_ITEM(NM_ACTIVATION_TYPE_EXTERNAL, "external"), );
+
+/*****************************************************************************/
+
+/**
+ * nm_utils_shorten_hostname:
+ * @hostname: the input hostname
+ * @shortened: (out) (transfer full): on return, the shortened hostname
+ *
+ * Checks whether the input hostname is valid. If not, tries to shorten it
+ * to HOST_NAME_MAX or to the first dot, whatever comes earlier.
+ * The new hostname is returned in @shortened.
+ *
+ * Returns: %TRUE if the input hostname was already valid or if was shortened
+ * successfully; %FALSE otherwise
+ */
+gboolean
+nm_utils_shorten_hostname(const char *hostname, char **shortened)
+{
+    gs_free char *s = NULL;
+    char *        dot;
+
+    nm_assert(hostname);
+    nm_assert(shortened);
+
+    if (nm_sd_hostname_is_valid(hostname, FALSE)) {
+        NM_SET_OUT(shortened, NULL);
+        return TRUE;
+    }
+
+    s   = g_strdup(hostname);
+    dot = strchr(s, '.');
+    if (dot)
+        *dot = 0;
+
+    if (strnlen(s, HOST_NAME_MAX + 1) > HOST_NAME_MAX)
+        s[HOST_NAME_MAX] = 0;
+
+    if (!nm_sd_hostname_is_valid(s, FALSE)) {
+        NM_SET_OUT(shortened, NULL);
+        return FALSE;
+    }
+
+    NM_SET_OUT(shortened, g_steal_pointer(&s));
+    return TRUE;
+}

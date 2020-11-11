@@ -316,7 +316,7 @@ gboolean nm_utils_sysctl_ip_conf_is_path(int         addr_family,
                                          const char *ifname,
                                          const char *property);
 
-gboolean nm_utils_is_specific_hostname(const char *name);
+gboolean nm_utils_shorten_hostname(const char *hostname, char **shortened);
 
 struct _NMUuid;
 
