@@ -744,9 +744,18 @@ update_system_hostname(NMPolicy *self, const char *msg)
         if (dhcp_config) {
             dhcp_hostname = nm_dhcp_config_get_option(dhcp_config, "host_name");
             if (dhcp_hostname && dhcp_hostname[0]) {
+                gs_free char *shortened = NULL;
+
                 p = nm_str_skip_leading_spaces(dhcp_hostname);
-                if (p[0]) {
-                    _set_hostname(self, p, "from DHCPv4");
+                if (nm_utils_shorten_hostname(p, &shortened)) {
+                    if (shortened) {
+                        _LOGW(LOGD_DNS,
+                              "set-hostname: DHCPv4-provided hostname '%s' is too long, shortened "
+                              "to '%s'",
+                              p,
+                              shortened);
+                    }
+                    _set_hostname(self, shortened ?: p, "from DHCPv4");
                     priv->dhcp_hostname = TRUE;
                     return;
                 }
@@ -763,9 +772,18 @@ update_system_hostname(NMPolicy *self, const char *msg)
         if (dhcp_config) {
             dhcp_hostname = nm_dhcp_config_get_option(dhcp_config, "fqdn_fqdn");
             if (dhcp_hostname && dhcp_hostname[0]) {
+                gs_free char *shortened = NULL;
+
                 p = nm_str_skip_leading_spaces(dhcp_hostname);
-                if (p[0]) {
-                    _set_hostname(self, p, "from DHCPv6");
+                if (nm_utils_shorten_hostname(p, &shortened)) {
+                    if (shortened) {
+                        _LOGW(LOGD_DNS,
+                              "set-hostname: DHCPv6-provided hostname '%s' is too long, shortened "
+                              "to '%s'",
+                              p,
+                              shortened);
+                    }
+                    _set_hostname(self, shortened ?: p, "from DHCPv6");
                     priv->dhcp_hostname = TRUE;
                     return;
                 }
