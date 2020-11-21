@@ -804,40 +804,40 @@ add_global_config(NMDnsDnsmasq *           self,
 }
 
 static void
-add_ip_config(NMDnsDnsmasq *self, GVariantBuilder *servers, const NMDnsConfigIPData *ip_data)
+add_ip_config(NMDnsDnsmasq *self, GVariantBuilder *servers, const NMDnsConfigData *data)
 {
-    NMIPConfig *  ip_config = ip_data->ip_config;
-    gconstpointer addr;
-    const char *  iface, *domain;
-    char          ip_addr_to_string_buf[IP_ADDR_TO_STRING_BUFLEN];
-    int           addr_family;
-    guint         i, j, num;
+    const char *iface;
+    const char *domain;
+    guint       num;
+    guint       i;
+    guint       j;
 
-    iface       = nm_platform_link_get_name(NM_PLATFORM_GET, ip_data->data->ifindex);
-    addr_family = nm_ip_config_get_addr_family(ip_config);
+    iface = nm_platform_link_get_name(NM_PLATFORM_GET, data->ifindex);
 
-    num = nm_ip_config_get_num_nameservers(ip_config);
+    num = nm_g_array_len(data->prepped.nameservers);
     for (i = 0; i < num; i++) {
-        addr = nm_ip_config_get_nameserver(ip_config, i);
-        ip_addr_to_string(addr_family, addr, iface, ip_addr_to_string_buf);
+        char                 ip_addr_to_string_buf[IP_ADDR_TO_STRING_BUFLEN];
+        const NMIPAddrTyped *addr = &g_array_index(data->prepped.nameservers, NMIPAddrTyped, i);
 
-        if (!ip_data->domains.has_default_route_explicit && ip_data->domains.has_default_route)
+        ip_addr_to_string(addr->addr_family, &addr->addr, iface, ip_addr_to_string_buf);
+
+        if (!data->prepped.has_default_route_explicit && data->prepped.has_default_route)
             add_dnsmasq_nameserver(self, servers, ip_addr_to_string_buf, NULL);
-        if (ip_data->domains.search) {
-            for (j = 0; ip_data->domains.search[j]; j++) {
-                domain = nm_utils_parse_dns_domain(ip_data->domains.search[j], NULL);
+        if (data->prepped.search) {
+            for (j = 0; data->prepped.search[j]; j++) {
+                domain = nm_utils_parse_dns_domain(data->prepped.search[j], NULL);
                 add_dnsmasq_nameserver(self,
                                        servers,
                                        ip_addr_to_string_buf,
                                        domain[0] ? domain : NULL);
             }
         }
-        if (ip_data->domains.reverse) {
-            for (j = 0; ip_data->domains.reverse[j]; j++) {
+        if (data->prepped.reverse) {
+            for (j = 0; data->prepped.reverse[j]; j++) {
                 add_dnsmasq_nameserver(self,
                                        servers,
                                        ip_addr_to_string_buf,
-                                       ip_data->domains.reverse[j]);
+                                       data->prepped.reverse[j]);
             }
         }
     }
@@ -846,19 +846,19 @@ add_ip_config(NMDnsDnsmasq *self, GVariantBuilder *servers, const NMDnsConfigIPD
 static GVariant *
 create_update_args(NMDnsDnsmasq *           self,
                    const NMGlobalDnsConfig *global_config,
-                   const CList *            ip_config_lst_head,
+                   const CList *            config_lst_head,
                    const char *             hostname)
 {
-    GVariantBuilder          servers;
-    const NMDnsConfigIPData *ip_data;
+    GVariantBuilder        servers;
+    const NMDnsConfigData *data;
 
     g_variant_builder_init(&servers, G_VARIANT_TYPE("aas"));
 
     if (global_config)
         add_global_config(self, &servers, global_config);
     else {
-        c_list_for_each_entry (ip_data, ip_config_lst_head, ip_config_lst)
-            add_ip_config(self, &servers, ip_data);
+        c_list_for_each_entry (data, config_lst_head, configs_lst)
+            add_ip_config(self, &servers, data);
     }
 
     return g_variant_new("(aas)", &servers);
@@ -1122,7 +1122,7 @@ start_dnsmasq(NMDnsDnsmasq *self, gboolean force_start, GError **error)
 static gboolean
 update(NMDnsPlugin *            plugin,
        const NMGlobalDnsConfig *global_config,
-       const CList *            ip_config_lst_head,
+       const CList *            config_lst_head,
        const char *             hostname,
        GError **                error)
 {
@@ -1134,7 +1134,7 @@ update(NMDnsPlugin *            plugin,
 
     nm_clear_pointer(&priv->set_server_ex_args, g_variant_unref);
     priv->set_server_ex_args =
-        g_variant_ref_sink(create_update_args(self, global_config, ip_config_lst_head, hostname));
+        g_variant_ref_sink(create_update_args(self, global_config, config_lst_head, hostname));
 
     send_dnsmasq_update(self);
     return TRUE;
