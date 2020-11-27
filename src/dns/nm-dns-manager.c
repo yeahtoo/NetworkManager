@@ -337,6 +337,10 @@ _mgr_get_ip_configs_lst_cmp(const CList *a_lst, const CList *b_lst, const void *
     /* Sort according to type (descendingly) */
     NM_CMP_FIELD(b, a, ip_config_type);
 
+    /* Prefer IPv6 */
+    NM_CMP_DIRECT(nm_ip_config_is_ipv4(a->ip_config),
+                  nm_ip_config_is_ipv4(b->ip_config));
+
     return 0;
 }
 
